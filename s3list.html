@@ -1,0 +1,232 @@
+<!--
+Copyright 2012-2016 Rufus Pollock.
+
+Licensed under the MIT license:
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+Credits & Adapted from  : https://github.com/rufuspollock/s3-bucket-listing
+-->
+
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>S3 Bucket listing</title>
+</head>
+
+<body>
+    
+    <script type="text/javascript" src="https://ajax.googleapis.com/ajax/libs/jquery/3.1.1/jquery.min.js"></script>
+    <script src="https://sdk.amazonaws.com/js/aws-sdk-2.49.0.min.js"></script>
+    <div id="status"></div>
+    <ul id="objects"></ul>
+
+    <script type="text/javascript">
+        var s3Bucket = 'BUCKET_NAME';
+        var S3B_SORT = 'NEW2OLD';
+
+        AWS.config.update({
+            accessKeyId: 'ACCESS_KEY',
+            secretAccessKey: 'ACCESS_SCERET',
+            region: 'REGION'
+        });
+
+        var prefix = getPrefix();
+        var bucket = new AWS.S3();
+        var objCount = 0;
+        var allObjects = [];
+
+        document.getElementById('objects').innerHTML += '<pre>' + prepareTable() + '</pre>';
+
+        getAllObjects();
+
+        function getAllObjects(NextContinuationToken) {
+            var params = {
+                Bucket: s3Bucket,
+                Prefix: prefix,
+                //MaxKeys: 3, default 1000(max) 
+                ContinuationToken: NextContinuationToken
+            }
+
+            bucket.listObjectsV2(params, function(err, data) {
+                if (err) {
+                    document.getElementById('status').innerHTML =
+                        'Could not load objects from S3';
+                } else {
+                    objCount += data.Contents.length;
+                    document.getElementById('status').innerHTML =
+                        'Loaded ' + objCount + ' items from S3';
+                    var filesData = getInfoFromS3Data(data);
+                    
+                    buildComplete(filesData.files);
+
+                    if (!filesData.nextContinuationToken) {
+                        var sortedFiles = allObjects;
+                        sortedFiles.sort(sortFunction);
+                        allObjects = sortedFiles;
+                        
+                        document.getElementById('objects').innerHTML += '<pre>' + populateTable(allObjects) + '</pre>';
+                    } else {
+                        getAllObjects(filesData.nextContinuationToken);
+                    }
+                }
+            });
+        }
+
+        function buildComplete(data) {
+            allObjects = allObjects.concat(data);
+        }
+
+        function getPrefix() {
+            var parameters = location.search.substring(1).split("&");
+            var temp = parameters[0].split("=");
+            var prefix1 = unescape(temp[1]);
+            return prefix1;
+        }
+
+        function fileDownloader(item) {
+
+            if (prefix !== item) {
+                var downloadkey = prefix + item;
+            } else {
+                var downloadkey = item;
+            }
+            console.log("downloading " + downloadkey);
+            var fileParts = item.split("/");
+            var filename = fileParts[fileParts.length - 1];
+            
+            bucket.getSignedUrl('getObject', {
+                Bucket: s3Bucket,
+                Key: downloadkey,
+                Expires: 60
+            }, function(err, data) {
+                if (err) console.log(err, err.stack); // an error occurred
+                else {
+                    window.open(data);
+                }
+            });
+        }
+
+        function getInfoFromS3Data(json) {
+            var files = $.map(json.Contents, function(item) {
+
+                return {
+                    Key: item['Key'],
+                    LastModified: item['LastModified'],
+                    Size: bytesToHumanReadable(item['Size']),
+                    Type: 'file'
+                }
+
+            });
+
+            if (json['IsTruncated']) {
+                var NextContinuationToken = json['NextContinuationToken'];
+            } else {
+                var NextContinuationToken = null;
+            }
+
+            return {
+                files: files,
+                prefix: json['Prefix'],
+                nextContinuationToken: NextContinuationToken
+            }
+        }
+
+        function prepareTable() {
+            var cols = [45, 30, 15];
+            var content = [];
+            content.push(padRight('Last Modified', cols[1]) + '  ' +
+                padRight('Size', cols[2]) + 'Key \n');
+            content.push(new Array(cols[0] + cols[1] + cols[2] + 4).join('-') + '\n');
+            return content.join('');
+        }
+
+        function populateTable(info) {
+            var cols = [45, 30, 15];
+            var content = [];
+            var files = info;
+
+            jQuery.each(files, function(idx, item) {
+                // strip off the prefix
+                if (prefix !== item.Key) {
+                    item.keyText = item.Key.substring(prefix.length);
+                } else {
+                    item.keyText = item.Key;
+                }
+
+                var row = renderRow(item, cols);
+                content.push(row + '\n');
+            });
+
+            return content.join('');
+        }
+
+        function renderRow(item, cols) {
+            var row = '';
+            if (!item.LastModified) {
+                row += padRight(item.LastModified, cols[1]) + '  ';
+            } else {
+                row += padRight(toLocal(item.LastModified), cols[1]) + '  ';
+            }
+
+            row += padRight(item.Size, cols[2]);
+            if(item.keyText.endsWith("/")){
+                row += item.keyText;
+            }else{
+            row += '<a href="#" onclick="fileDownloader(\'' + item.keyText + '\')">' + item.keyText + '</a>';
+        }
+            return row;
+        }
+
+        function toLocal(date) {
+            var local = new Date(date);
+            local.setMinutes(local.getMinutes() - local.getTimezoneOffset());
+            return local.toJSON();
+        }
+
+        function padRight(padString, length) {
+            var str = padString.slice(0, length - 3);
+            if (padString.length > str.length) {
+                str += '...';
+            }
+            while (str.length < length) {
+                str = str + ' ';
+            }
+            return str;
+        }
+
+        function bytesToHumanReadable(sizeInBytes) {
+            var i = -1;
+            var units = [' kB', ' MB', ' GB'];
+            do {
+                sizeInBytes = sizeInBytes / 1024;
+                i++;
+            } while (sizeInBytes > 1024);
+            return Math.max(sizeInBytes, 0.1).toFixed(1) + units[i];
+        }
+
+        function sortFunction(a, b) {
+            switch (S3B_SORT) {
+                case "OLD2NEW":
+                    return a.LastModified > b.LastModified ? 1 : -1;
+                case "NEW2OLD":
+                    return a.LastModified < b.LastModified ? 1 : -1;
+                case "A2Z":
+                    return a.Key < b.Key ? 1 : -1;
+                case "Z2A":
+                    return a.Key > b.Key ? 1 : -1;
+                case "BIG2SMALL":
+                    return a.Size < b.Size ? 1 : -1;
+                case "SMALL2BIG":
+                    return a.Size > b.Size ? 1 : -1;
+            }
+        }
+    </script>
+</body>
+
+</html>
