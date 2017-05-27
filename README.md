@@ -14,7 +14,7 @@ Once set, run the script directly in browser. Few sample urls:
 * ..../s3list.html/prefix=    : This will list all the keys in your bucket
 * ..../s3list.html/prefix=dir : List all keys that begins with dir
 
-Since there is no concept of folder/directory in S3, entire key is listed. To download any file, click on the listed element, file would be downloaded with actual name of the file ignoring all the nested directories from keyname(if any).
+Since there is no concept of folder/directory in S3, entire key is listed for each file in sorted order of modification time. To download any file, click on the listed element, file would be downloaded with actual name of the file ignoring all the nested directories from keyname(if any).
 
 ## How it works
 
